@@ -26,7 +26,7 @@ struct Map {
     };
     using index_t = uint32_t;
     static constexpr auto valuesInNodeCount = 14;
-    static constexpr auto invalidIndex = index_t{};
+    static constexpr auto invalidNextIndex = index_t{}; //next index cannot point inside of initial values (and their count is always > 0)
 
     using pstate_t = uint64_t;
     static pstate_t packState(
@@ -93,7 +93,7 @@ struct Map {
         bits |= sRoomIndex;
         bits <<= 4;
         bits |= fRoomIndex;
-        return (index_t) (std::hash<decltype(bits)>{}(bits) % hashCapacity) + 1;
+        return index_t(std::hash<decltype(bits)>{}(bits) % hashCapacity);
     }
 
 
@@ -102,10 +102,9 @@ struct Map {
         index_t const hash
     ) const {
         auto index = hash;
-        assert(index != invalidIndex);
         accessCount++;
         while(true) {
-            auto const &node = nodes[index - 1];
+            auto const &node = nodes[index];
             auto const count = node.data[14] >> 28;
 
             auto const auxData = node.data[14];
@@ -119,7 +118,7 @@ struct Map {
             }
 
             auto const nextNodeIndex = (index_t) node.data[15];
-            if(nextNodeIndex == invalidIndex) return invalid;
+            if(nextNodeIndex == invalidNextIndex) return invalid;
             index = nextNodeIndex;
         }
     }
@@ -130,30 +129,24 @@ struct Map {
         index_t const hash 
     ) {
         auto index = hash;
-        assert(index != invalidIndex);
         auto curChainLen = 1;
         while(true) {
-            auto &node = nodes[index - 1];
+            auto &node = nodes[index];
             auto const count = node.data[14] >> 28;
 
-            if(count == 6) {
-                auto nextNodeIndex = node.data[15];
-                if(nextNodeIndex != invalidIndex) {
-                    index = nextNodeIndex;
-                    curChainLen++;
-                    continue;
-                }
-                if(nodesCount == nodesCapacity) { didntPut++; return; }
-                nextNodeIndex = index = nodesCount++;
-                node.data[15] = nextNodeIndex;
+            if(count == valuesInNodeCount) {
+                auto &nextNodeIndex = node.data[15];
+                if(nextNodeIndex != invalidNextIndex) index = nextNodeIndex;
+                else if(nodesCount == nodesCapacity) { didntPut++; return; }
+                else index = nextNodeIndex = nodesCount++;
+
                 curChainLen++;
                 continue;
             }
             
             node.data[count] = pState;
-            node.data[14] = (node.data[14] & ~(0b1111u << 28)) | ((count+1) << 28)
+            node.data[14] = (node.data[14] + (1 << 28)) //increment count (no overflow guaranteed, but even if it happens, it wouldn't matter)
                 | ((pState >> 32) & 0b11) << (2*count);
-            static_assert(invalidIndex == 0) /*node.data[15] = invalidIndex;*/;
             values[index*valuesInNodeCount + count] = value;
 
             entriesCount++;

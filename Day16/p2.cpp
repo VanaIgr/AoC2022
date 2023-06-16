@@ -91,91 +91,65 @@ struct Rooms {
 
 static Rooms<16> rooms;
 static Map<int> map(-1);
-static uint8_t lastPaths[2][32];
 
 struct MaxPressure {
     struct Data {
         uint8_t curRoom;
         int8_t stepsRem;
-        uint8_t lastPathC, lastPathIndex;
     };
 
     static int maxPressure(
         uint16_t const curState, 
         Data df, Data ds
     ) {
-        if(df.stepsRem <= 0 & df.stepsRem <= 0) return 0;
-
         //df must have more time than ds
         if(df.stepsRem < ds.stepsRem) std::swap(df, ds);
+        if(df.stepsRem <= 0) return 0;
         
-        auto const hash = decltype(map)::calcHash(curState, df.curRoom, ds.curRoom, df.stepsRem, ds.stepsRem);
         auto const pState = decltype(map)::packState(curState, df.curRoom, ds.curRoom, df.stepsRem, ds.stepsRem); 
+        auto const hash = decltype(map)::calcHash(curState, df.curRoom, ds.curRoom, df.stepsRem, ds.stepsRem);
         auto const mapCand = map.get(pState, hash);
         if(mapCand >= 0) return mapCand;
-
-        auto const lastPathF = lastPaths[df.lastPathIndex];
-        //auto const prevLastEntryF = lastPathF[df.lastPathC];
-        lastPathF[df.lastPathC] = df.curRoom;
         
-        int max;
-
-        //turn valve in current room
-        if(((curState >> df.curRoom) & 1) == 0) {
-            auto newDf = df;
-            newDf.lastPathC++;
-            newDf.stepsRem = df.stepsRem - 1;
-
-            max = maxPressure(
-                curState | (uint16_t(1) << df.curRoom),
-                newDf, ds
-            ) + rooms.rate[df.curRoom] * newDf.stepsRem;
-        }
-        else max = 0;
-
+        auto max = 0;
+        
         auto const nextRooms = rooms.getConnectedRooms(df.curRoom);
         auto const stepsToRooms = rooms.getStepsToConnectedFor(df.curRoom);
         for(int i = 0;; i++) {
             auto const nextRoomOffI = nextRooms[i];
             if(nextRoomOffI == 0) break;
 
-            auto alreadyVisited = false;
-            for(auto i = 0; i < df.lastPathC; i++) {
-                if(lastPathF[i] == nextRoomOffI-1) {
-                    alreadyVisited = true;
-                    break;
-                }
-            }
-            if(alreadyVisited) continue;
-
             auto newDf = df;
-            newDf.lastPathC++;
-            newDf.stepsRem = df.stepsRem - stepsToRooms[i];
-            newDf.curRoom = nextRoomOffI-1;
+            newDf.stepsRem = df.stepsRem - stepsToRooms[i] - 1;
+            newDf.curRoom = nextRoomOffI - 1;
 
-            auto const maxCand = maxPressure(
-                curState, newDf, ds
+            if((curState >> newDf.curRoom) & 1) continue; 
+
+            auto const shouldTurnValve = newDf.stepsRem > 0;
+            if(!shouldTurnValve/*misleading but correct*/) newDf.stepsRem = 0;
+
+            max = std::max(
+                maxPressure(
+                    curState | (uint16_t(shouldTurnValve) << newDf.curRoom),
+                    newDf, ds
+                ) + rooms.rate[newDf.curRoom] * newDf.stepsRem,
+                max
             );
-            if(maxCand > max) max = maxCand;
         }
 
         iterations++;
         if(iterations % (65536*8) == 0) std::cout << "iter: " << iterations << '\n';
 
         if(max != 0) map.put(max, pState, hash);
-        //lastPathF[df.lastPathC] = prevLastEntryF;
         return max;
     }
 
     static int maxPressure(uint8_t startingRoom) {
-        auto state = uint16_t{};
-        if(rooms.rate[startingRoom] == 0) state = 1u << startingRoom;
-
-        //uint8_t curRoom, stepsRem, lastPathC, lastPathIndex;
+        assert(rooms.rate[startingRoom] == 0);
         return maxPressure(
-            uint64_t(0), 
-            Data{ startingRoom, 26, 0, 0 },
-            Data{ startingRoom, 26, 0, 1 }
+            uint16_t(0), 
+            Data{ startingRoom, 26 },
+            Data{ startingRoom, 26 }
         );
     }
 };
@@ -378,8 +352,7 @@ int main() {
     std::uniform_int_distribution<uint8_t> remainingSteps(0, 30);
     std::uniform_int_distribution<int> pressure(0);
    
-    auto map = Map{};
-    for(int iter = 0; iter < 100'000; ++iter) {
+    for(int iter = 0; iter < 100'000'000; ++iter) {
         auto const s = state(gen);
         auto const i = roomIndex(gen);
         auto const i2 = roomIndex(gen);
@@ -387,11 +360,11 @@ int main() {
         auto const r2 = remainingSteps(gen);
         auto g2 = std::mt19937(s + i + i2 + r + r2);
         auto const p = pressure(g2);
-        auto const hash = Map::calcHash(s, i, i2, r, r2);
-        auto const pState = Map::packState(s, i, i2, r, r2);
+        auto const hash = decltype(map)::calcHash(s, i, i2, r, r2);
+        auto const pState = decltype(map)::packState(s, i, i2, r, r2);
         
-        map.putPressure(p, pState, hash);
-        auto const p2 = map.getPressure(pState, hash);
+        map.put(p, pState, hash);
+        auto const p2 = map.get(pState, hash);
 
         if(p != p2) {
             printf("iteration %d:\n\tstate = 0x", iter);
