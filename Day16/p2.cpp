@@ -89,17 +89,8 @@ struct Rooms {
     }
 };
 
-struct Result {
-    int pressure;
-    int room;
-    int actor;
-    int stepsRem;
-    int action;
-    Result *inner;
-};
-
 static Rooms<16> rooms;
-static Map<Result> map(Result{ -1, 0, 0, 0, 0, nullptr });
+static Map<int> map(-1);
 static uint8_t lastPaths[2][32];
 
 struct MaxPressure {
@@ -109,29 +100,26 @@ struct MaxPressure {
         uint8_t lastPathC, lastPathIndex;
     };
 
-    static Result *maxPressure(
+    static int maxPressure(
         uint16_t const curState, 
         Data df, Data ds
     ) {
-        if(df.stepsRem <= 0 & df.stepsRem <= 0) return new Result{ 0, -1, -1, 0, -1, nullptr };
+        if(df.stepsRem <= 0 & df.stepsRem <= 0) return 0;
 
+        //df must have more time than ds
         if(df.stepsRem < ds.stepsRem) std::swap(df, ds);
-        //df has more time than ds
         
         auto const hash = decltype(map)::calcHash(curState, df.curRoom, ds.curRoom, df.stepsRem, ds.stepsRem);
         auto const pState = decltype(map)::packState(curState, df.curRoom, ds.curRoom, df.stepsRem, ds.stepsRem); 
         auto const mapCand = map.get(pState, hash);
-        if(mapCand.pressure >= 0) return new Result{ mapCand };
+        if(mapCand >= 0) return mapCand;
 
         auto const lastPathF = lastPaths[df.lastPathIndex];
         auto const prevLastEntryF = lastPathF[df.lastPathC];
         lastPathF[df.lastPathC] = df.curRoom;
         
-        //int max;
-        Result res{};
-        res.room = df.curRoom;
-        res.actor = df.lastPathIndex;
-        res.stepsRem = df.stepsRem;
+        int max;
+
         //turn valve in current room
         if(((curState >> df.curRoom) & 1) == 0) {
             auto newDf = df;
@@ -139,18 +127,12 @@ struct MaxPressure {
             newDf.stepsRem = df.stepsRem - 1;
             newDf.lastPathC = 0;
 
-            auto const inner = maxPressure(
+            max = maxPressure(
                 curState | (uint16_t(1) << df.curRoom),
                 newDf, ds
-            );
-            res.pressure = inner->pressure + rooms.rate[df.curRoom] * newDf.stepsRem;
-            res.inner = inner;
-            res.action = 0;
+            ) + rooms.rate[df.curRoom] * newDf.stepsRem;
         }
-        else {
-            res.pressure = 0;
-            //max = 0;
-        }
+        else max = 0;
 
         auto const nextRooms = rooms.getConnectedRooms(df.curRoom);
         auto const stepsToRooms = rooms.getStepsToConnectedFor(df.curRoom);
@@ -175,21 +157,15 @@ struct MaxPressure {
             auto const maxCand = maxPressure(
                 curState, newDf, ds
             );
-            if(maxCand->pressure > res.pressure) {
-                res.pressure = maxCand->pressure;
-                res.inner = maxCand;
-                res.action = 1;
-                //max = maxCand;
-            }
-            else delete maxCand;
+            if(maxCand > max) max = maxCand;
         }
 
         iterations++;
         if(iterations % (65536*8) == 0) std::cout << "iter: " << iterations << '\n';
 
-        if(res.pressure != 0) map.put(res, pState, hash);
+        if(max != 0) map.put(max, pState, hash);
         lastPathF[df.lastPathC] = prevLastEntryF;
-        return new Result{res};
+        return max;
     }
 
     static int maxPressure(uint8_t startingRoom) {
@@ -197,33 +173,11 @@ struct MaxPressure {
         if(rooms.rate[startingRoom] == 0) state = 1u << startingRoom;
 
         //uint8_t curRoom, stepsRem, lastPathC, lastPathIndex;
-        auto const a = maxPressure(
+        return maxPressure(
             uint64_t(0), 
             Data{ startingRoom, 26, 0, 0 },
             Data{ startingRoom, 26, 0, 1 }
         );
-
-        auto b = a;
-        while(b) {
-            std::cout << "Steps: " << (26 - b->stepsRem)
-                << ", actor " << b->actor << " in room ";
-            rooms.printName(b->room);
-            if(b->action) std::cout << ", moves to different room";
-            else std::cout << ", opens valve";
-            std::cout << ", pressure: " << b->pressure << '\n';
-
-            b = b->inner;
-        }
-
-        return a->pressure;
-
-            /*
-            int pressure;
-            int room;
-            int actor;
-            int stepsRem;
-            Result *inner;
-            */
     }
 };
 
@@ -352,9 +306,19 @@ int main() {
         );
     }
 
-    auto const mp = MaxPressure::maxPressure(startRoom);
+    std::cout << "Rooms: " << roomsRoomsC << '\n';
 
-    std::cout << mp << '\n';
+    auto const start = std::chrono::high_resolution_clock::now();
+        auto const mp = MaxPressure::maxPressure(startRoom);
+    auto const end = std::chrono::high_resolution_clock::now();
+
+    auto const time = (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0);
+    std::cout << "maxPressure(" << time << "ms, " << iterations << " iters): " << mp << '\n';
+    std::cout << "map max chain is " << map.maxChain << " steps,\nused "
+        << map.entriesCount << " entries in "
+        << map.nodesCount << " nodes.\n";
+    std::cout << "accessed " << map.accessCount << " times, " << map.successCount << " successfully\n";
+    std::cout << "didn't fin in cache: " << map.didntPut << " entries\n";
 
     return 0;
     /*std::cout << "rooms: " << roomCount << '\n';
