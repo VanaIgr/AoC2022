@@ -115,7 +115,7 @@ struct MaxPressure {
         if(mapCand >= 0) return mapCand;
 
         auto const lastPathF = lastPaths[df.lastPathIndex];
-        auto const prevLastEntryF = lastPathF[df.lastPathC];
+        //auto const prevLastEntryF = lastPathF[df.lastPathC];
         lastPathF[df.lastPathC] = df.curRoom;
         
         int max;
@@ -125,7 +125,6 @@ struct MaxPressure {
             auto newDf = df;
             newDf.lastPathC++;
             newDf.stepsRem = df.stepsRem - 1;
-            newDf.lastPathC = 0;
 
             max = maxPressure(
                 curState | (uint16_t(1) << df.curRoom),
@@ -164,7 +163,7 @@ struct MaxPressure {
         if(iterations % (65536*8) == 0) std::cout << "iter: " << iterations << '\n';
 
         if(max != 0) map.put(max, pState, hash);
-        lastPathF[df.lastPathC] = prevLastEntryF;
+        //lastPathF[df.lastPathC] = prevLastEntryF;
         return max;
     }
 
@@ -202,16 +201,16 @@ static void fillConnectedRooms(
     for(int i = 0; i < curRoom.connectedRooms.count; i++) {
         auto const nextRoomArrI = curRoom.connectedRooms.data[i];
         auto const &nextRoom = roomsArr[nextRoomArrI];
-        if(nextRoom.rate == 0) {
-            connectedRoomsRoomsArrPath[connectedRoomsPathC++] = curRoomArrI;
-            fillConnectedRooms(
-                roomsArr, roomCount,
-                startRoomRoomsI, nextRoomArrI,
-                steps + 1
-            );
-            connectedRoomsPathC--;
-            continue;
-        }
+
+        connectedRoomsRoomsArrPath[connectedRoomsPathC++] = curRoomArrI;
+        fillConnectedRooms(
+            roomsArr, roomCount,
+            startRoomRoomsI, nextRoomArrI,
+            steps + 1
+        );
+        connectedRoomsPathC--;
+
+        if(nextRoom.rate == 0) continue; 
 
         auto const nextRoomRoomsI = nextRoom.roomsIndex;
         if(nextRoomRoomsI == startRoomRoomsI) continue;
